@@ -132,6 +132,11 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
   // Edit Single Cue Dialog (360x640 Interactive Preview)
   const [editingCue, setEditingCue] = useState<SubtitleCue | null>(null);
 
+  // Subtitle Frame PlayRes resolution directly governing the workspace
+  const playResX = subtitleFrame?.playResX && subtitleFrame.playResX > 0 ? subtitleFrame.playResX : 1920;
+  const playResY = subtitleFrame?.playResY && subtitleFrame.playResY > 0 ? subtitleFrame.playResY : 1080;
+  const frameAspect = playResX / playResY;
+
   // Presets Management in Drawer
   const [selectedPresetIndex, setSelectedPresetIndex] = useState(0);
   const [showAddPresetModal, setShowAddPresetModal] = useState(false);
@@ -407,40 +412,59 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
       <div className="flex-1 flex flex-col lg:flex-row overflow-hidden pb-16 lg:pb-0">
         {/* Left Side: Video Preview + Player Controls + Quick Cue Editor */}
         <div className="lg:w-3/5 xl:w-2/3 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-800 bg-[#0C0E14]">
-          {/* Video Player Box with Subtitle Overlay */}
-          <div className="relative w-full aspect-video bg-black flex items-center justify-center overflow-hidden group">
-            <video
-              ref={videoRef}
-              src={videoUrl || '/sample_demo.mp4'}
-              className="w-full h-full object-contain pointer-events-auto"
-              onTimeUpdate={handleTimeUpdate}
-              onLoadedMetadata={handleLoadedMetadata}
-              onPlay={() => setIsPlaying(true)}
-              onPause={() => setIsPlaying(false)}
-              playsInline
-              onClick={togglePlay}
-            />
-
-            {/* Subtitle Overlay strictly positioned over the video */}
-            <SubtitleOverlay
-              activeCues={visibleCues}
-              style={style}
-              styleDefinitions={styles}
-              sourceVideoWidth={subtitleFrame.playResX}
-              sourceVideoHeight={subtitleFrame.playResY}
-              currentPositionMs={currentTimeMs}
-              onCueDragged={handleCueDragged}
-            />
-
-            {/* Center Play Button Overlay on Hover */}
-            {!isPlaying && (
-              <button
+          {/* Video Player Box with Subtitle Overlay directly governed by PlayResX & PlayResY */}
+          <div className="relative w-full bg-[#08090D] flex items-center justify-center p-2 lg:p-3 overflow-hidden">
+            <div
+              className="relative w-full max-h-[55vh] xl:max-h-[62vh] mx-auto bg-black flex items-center justify-center overflow-hidden group rounded-xl border border-slate-800/80 shadow-2xl transition-all duration-300"
+              style={{
+                aspectRatio: `${playResX} / ${playResY}`,
+                maxWidth: frameAspect < 1 ? `calc((55vh) * ${frameAspect})` : '100%',
+              }}
+            >
+              <video
+                ref={videoRef}
+                src={videoUrl || '/sample_demo.mp4'}
+                className="w-full h-full object-contain pointer-events-auto"
+                onTimeUpdate={handleTimeUpdate}
+                onLoadedMetadata={handleLoadedMetadata}
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+                playsInline
                 onClick={togglePlay}
-                className="absolute w-14 h-14 rounded-full bg-indigo-600/80 hover:bg-indigo-600 text-white flex items-center justify-center shadow-2xl backdrop-blur-xs transition transform hover:scale-110 pointer-events-auto"
+              />
+
+              {/* Subtitle Overlay strictly positioned over the video */}
+              <SubtitleOverlay
+                activeCues={visibleCues}
+                style={style}
+                styleDefinitions={styles}
+                sourceVideoWidth={playResX}
+                sourceVideoHeight={playResY}
+                currentPositionMs={currentTimeMs}
+                onCueDragged={handleCueDragged}
+              />
+
+              {/* Resolution indicator badge governed by Font & Biçim */}
+              <button
+                type="button"
+                onClick={() => setActiveDrawer('TEXT_STYLE')}
+                className="absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5 px-2.5 py-1 bg-black/80 hover:bg-black/95 backdrop-blur-md rounded-md border border-slate-700/80 text-[10px] font-mono text-sky-300 transition shadow-md pointer-events-auto"
+                title="Sub Frame çözünürlüğünü Font & Biçim çekmecesinden düzenleyin"
               >
-                <Play className="w-7 h-7 fill-current ml-1" />
+                <Tv className="w-3 h-3 text-sky-400" />
+                <span>PlayRes: {playResX}x{playResY}</span>
               </button>
-            )}
+
+              {/* Center Play Button Overlay on Hover */}
+              {!isPlaying && (
+                <button
+                  onClick={togglePlay}
+                  className="absolute w-14 h-14 rounded-full bg-indigo-600/80 hover:bg-indigo-600 text-white flex items-center justify-center shadow-2xl backdrop-blur-xs transition transform hover:scale-110 pointer-events-auto"
+                >
+                  <Play className="w-7 h-7 fill-current ml-1" />
+                </button>
+              )}
+            </div>
           </div>
 
           {/* Player Timeline & Controls Bar */}

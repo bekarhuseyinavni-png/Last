@@ -64,24 +64,41 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
   const [isBold, setIsBold] = useState<boolean | undefined>(cue.customIsBold ?? undefined);
   const [isItalic, setIsItalic] = useState<boolean | undefined>(cue.customIsItalic ?? undefined);
 
-  // Position coordinates in 640x360 preview space (16:9 standard video aspect)
-  // If \pos(x, y) exists in PlayRes coordinates, scale to 640x360
+  // PlayRes resolution directly governing the preview canvas and coordinate space
+  const frameW = subtitleFrame?.playResX && subtitleFrame.playResX > 0 ? subtitleFrame.playResX : 1920;
+  const frameH = subtitleFrame?.playResY && subtitleFrame.playResY > 0 ? subtitleFrame.playResY : 1080;
+  const frameAspect = frameW / frameH;
+
+  // Position coordinates in 1:1 PlayRes coordinate space
   const initialCoord = initialTags.pos
     ? {
-        x: (initialTags.pos[0] / subtitleFrame.playResX) * 640,
-        y: (initialTags.pos[1] / subtitleFrame.playResY) * 360,
+        x: initialTags.pos[0],
+        y: initialTags.pos[1],
       }
-    : { x: 320, y: 310 }; // Default bottom center in 640x360 space
+    : { x: Math.round(frameW / 2), y: Math.round(frameH * 0.85) };
 
   const [posCoord, setPosCoord] = useState<{ x: number; y: number }>(initialCoord);
   const [hasCustomPos, setHasCustomPos] = useState<boolean>(!!initialTags.pos);
 
-  // 640x360 Canvas & Video Snapshot
+  // Canvas & Video Snapshot
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const hiddenVideoRef = useRef<HTMLVideoElement>(null);
   const previewBoxRef = useRef<HTMLDivElement>(null);
+  const [previewHeight, setPreviewHeight] = useState<number>(360);
   const [isVideoFrameReady, setIsVideoFrameReady] = useState(false);
   const [isDraggingText, setIsDraggingText] = useState(false);
+
+  useEffect(() => {
+    const el = previewBoxRef.current;
+    if (!el) return;
+    const update = () => {
+      if (el.clientHeight > 0) setPreviewHeight(el.clientHeight);
+    };
+    update();
+    const observer = new ResizeObserver(update);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, [frameW, frameH]);
 
   const startMs = parseTimestamp(startText) ?? cue.startTimeMs;
   const endMs = parseTimestamp(endText) ?? cue.endTimeMs;
@@ -90,7 +107,7 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
   // Active style definition for preview styling
   const activePreset = styles.find((s) => s.name.toLowerCase() === styleName.toLowerCase()) || styles[0];
 
-  // Capture video frame at startMs onto 640x360 canvas
+  // Capture video frame at startMs onto canvas matching exact PlayRes resolution
   const drawFrameToCanvas = useCallback(() => {
     const video = hiddenVideoRef.current;
     const canvas = canvasRef.current;
@@ -100,11 +117,10 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
 
     if (video && video.readyState >= 2 && video.videoWidth > 0) {
       try {
-        // Draw video frame scaled to 640x360 (16:9)
         const vW = video.videoWidth;
         const vH = video.videoHeight;
         const vAspect = vW / vH;
-        const targetAspect = 640 / 360;
+        const targetAspect = frameW / frameH;
 
         let sWidth = vW;
         let sHeight = vH;
@@ -119,7 +135,7 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
           sY = (vH - sHeight) / 2;
         }
 
-        ctx.drawImage(video, sX, sY, sWidth, sHeight, 0, 0, 640, 360);
+        ctx.drawImage(video, sX, sY, sWidth, sHeight, 0, 0, frameW, frameH);
         setIsVideoFrameReady(true);
         return;
       } catch (err) {
@@ -127,33 +143,35 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
       }
     }
 
-    // Fallback: draw stylish dark cinematic background in 640x360
-    const gradient = ctx.createLinearGradient(0, 0, 640, 360);
+    // Fallback: draw stylish dark cinematic background matching PlayRes
+    const gradient = ctx.createLinearGradient(0, 0, frameW, frameH);
     gradient.addColorStop(0, '#10141e');
     gradient.addColorStop(0.5, '#1e2436');
     gradient.addColorStop(1, '#0c0e14');
     ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, 640, 360);
+    ctx.fillRect(0, 0, frameW, frameH);
 
     // Grid guide lines
-    ctx.strokeStyle = 'rgba(99, 102, 241, 0.2)';
-    ctx.lineWidth = 1;
-    ctx.strokeRect(30, 20, 580, 320);
+    ctx.strokeStyle = 'rgba(99, 102, 241, 0.25)';
+    ctx.lineWidth = Math.max(1, Math.round(frameH / 400));
+    const padX = Math.round(frameW * 0.05);
+    const padY = Math.round(frameH * 0.05);
+    ctx.strokeRect(padX, padY, frameW - padX * 2, frameH - padY * 2);
     ctx.beginPath();
-    ctx.moveTo(320, 0);
-    ctx.lineTo(320, 360);
-    ctx.moveTo(0, 180);
-    ctx.lineTo(640, 180);
+    ctx.moveTo(frameW / 2, 0);
+    ctx.lineTo(frameW / 2, frameH);
+    ctx.moveTo(0, frameH / 2);
+    ctx.lineTo(frameW, frameH / 2);
     ctx.stroke();
 
-    // Timecode text
-    ctx.fillStyle = 'rgba(255, 255, 255, 0.5)';
-    ctx.font = '13px monospace';
+    // Timecode & PlayRes info text
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.6)';
+    ctx.font = `${Math.max(14, Math.round(frameH * 0.035))}px monospace`;
     ctx.textAlign = 'center';
-    ctx.fillText(`640x360 Video Önizleme Karesi`, 320, 165);
-    ctx.fillText(`Giriş Saniyesi: ${formatTimestamp(startMs)}`, 320, 195);
+    ctx.fillText(`PlayRes: ${frameW}x${frameH}`, frameW / 2, frameH / 2 - 15);
+    ctx.fillText(`Giriş Saniyesi: ${formatTimestamp(startMs)}`, frameW / 2, frameH / 2 + 20);
     setIsVideoFrameReady(true);
-  }, [startMs]);
+  }, [startMs, frameW, frameH]);
 
   // When startMs or videoUrl changes, seek hidden video
   useEffect(() => {
@@ -184,7 +202,7 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
     setEndText(formatTimestamp(currentVideoPositionMs));
   };
 
-  // Drag text in 640x360 preview
+  // Drag text in PlayRes preview
   const handlePreviewMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
     const box = previewBoxRef.current;
     if (!box) return;
@@ -192,12 +210,12 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
     const clientX = e.clientX - rect.left;
     const clientY = e.clientY - rect.top;
 
-    // Scale from rendered element size to exact 640x360 coordinates
-    const scaleX = 640 / rect.width;
-    const scaleY = 360 / rect.height;
+    // Scale from rendered element size to exact PlayRes coordinates
+    const scaleX = frameW / rect.width;
+    const scaleY = frameH / rect.height;
 
-    const newX = Math.round(Math.max(10, Math.min(630, clientX * scaleX)));
-    const newY = Math.round(Math.max(10, Math.min(350, clientY * scaleY)));
+    const newX = Math.round(Math.max(0, Math.min(frameW, clientX * scaleX)));
+    const newY = Math.round(Math.max(0, Math.min(frameH, clientY * scaleY)));
 
     setPosCoord({ x: newX, y: newY });
     setHasCustomPos(true);
@@ -212,11 +230,11 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
     const clientX = e.clientX - rect.left;
     const clientY = e.clientY - rect.top;
 
-    const scaleX = 640 / rect.width;
-    const scaleY = 360 / rect.height;
+    const scaleX = frameW / rect.width;
+    const scaleY = frameH / rect.height;
 
-    const newX = Math.round(Math.max(10, Math.min(630, clientX * scaleX)));
-    const newY = Math.round(Math.max(10, Math.min(350, clientY * scaleY)));
+    const newX = Math.round(Math.max(0, Math.min(frameW, clientX * scaleX)));
+    const newY = Math.round(Math.max(0, Math.min(frameH, clientY * scaleY)));
 
     setPosCoord({ x: newX, y: newY });
   };
@@ -237,7 +255,7 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
 
   const handleResetPos = () => {
     setHasCustomPos(false);
-    setPosCoord({ x: 320, y: 310 });
+    setPosCoord({ x: Math.round(frameW / 2), y: Math.round(frameH * 0.85) });
     setRawText((prev) => updateTag(prev, 'pos', null));
   };
 
@@ -256,9 +274,7 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
 
     // Preserve and update \pos() if custom position was moved
     if (hasCustomPos) {
-      const assX = Math.round((posCoord.x / 640) * subtitleFrame.playResX);
-      const assY = Math.round((posCoord.y / 360) * subtitleFrame.playResY);
-      updatedRaw = updatePos(updatedRaw, assX, assY);
+      updatedRaw = updatePos(updatedRaw, posCoord.x, posCoord.y);
     }
 
     const clean = cleanToPlainText(updatedRaw);
@@ -314,7 +330,7 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
                 </span>
               </div>
               <p className="text-[11px] text-slate-400">
-                Süre: {(duration / 1000).toFixed(2)}s • Giriş: {formatTimestamp(startMs)} • Önizleme: 640x360
+                Süre: {(duration / 1000).toFixed(2)}s • Giriş: {formatTimestamp(startMs)} • Sub Frame: PlayRes {frameW}x{frameH}
               </p>
             </div>
           </div>
@@ -326,14 +342,14 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
           </button>
         </div>
 
-        {/* Form Body: 640x360 Interactive Preview prominently displayed */}
+        {/* Form Body: Interactive Preview prominently governed by PlayRes */}
         <div className="p-5 flex-1 overflow-y-auto space-y-5">
-          {/* 640x360 Interactive Preview Section */}
+          {/* Interactive Preview Section */}
           <div className="bg-[#1E2333]/30 p-4 rounded-2xl border border-indigo-500/30 flex flex-col items-center">
             <div className="w-full flex items-center justify-between mb-2">
               <span className="text-xs font-bold text-white flex items-center gap-1.5">
                 <Move className="w-4 h-4 text-indigo-400" />
-                Özel Konum Önizleme (640 x 360)
+                Özel Konum Önizleme (PlayRes: {frameW} x {frameH})
               </span>
               <div className="flex items-center gap-3">
                 <span className="text-[11px] text-indigo-300 font-mono">
@@ -351,38 +367,43 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
               </div>
             </div>
 
-            {/* 640x360 Interactive Stage Container */}
+            {/* Interactive Stage Container directly governed by PlayResX & PlayResY */}
             <div
               ref={previewBoxRef}
               onMouseDown={handlePreviewMouseDown}
               onMouseMove={handlePreviewMouseMove}
               onMouseUp={handlePreviewMouseUp}
-              className="relative w-full max-w-[640px] aspect-[16/9] rounded-xl overflow-hidden border-2 border-indigo-500/40 shadow-2xl bg-black cursor-crosshair select-none group"
+              style={{
+                aspectRatio: `${frameW} / ${frameH}`,
+                maxHeight: '400px',
+                maxWidth: frameAspect < 1 ? `calc(400px * ${frameAspect})` : '640px',
+              }}
+              className="relative w-full mx-auto rounded-xl overflow-hidden border-2 border-indigo-500/40 shadow-2xl bg-black cursor-crosshair select-none group transition-all"
             >
-              {/* Canvas Background: captures exact video frame at startMs scaled to 640x360 */}
+              {/* Canvas Background: captures exact video frame at startMs scaled to PlayRes */}
               <canvas
                 ref={canvasRef}
-                width={640}
-                height={360}
+                width={frameW}
+                height={frameH}
                 className="w-full h-full object-cover block"
               />
 
               {/* Resolution & Time Badge */}
-              <div className="absolute top-2 left-2 bg-black/70 backdrop-blur-xs px-2.5 py-1 rounded text-[11px] font-mono text-indigo-300 border border-indigo-500/30 pointer-events-none">
-                640x360 • {formatTimestamp(startMs)}
+              <div className="absolute top-2 left-2 bg-black/75 backdrop-blur-xs px-2.5 py-1 rounded text-[11px] font-mono text-indigo-300 border border-indigo-500/30 pointer-events-none">
+                PlayRes: {frameW}x{frameH} • {formatTimestamp(startMs)}
               </div>
 
               {/* Subtitle Draggable Text Element */}
               <div
                 style={{
-                  left: `${(posCoord.x / 640) * 100}%`,
-                  top: `${(posCoord.y / 360) * 100}%`,
+                  left: `${(posCoord.x / frameW) * 100}%`,
+                  top: `${(posCoord.y / frameH) * 100}%`,
                   transform: `translate(-50%, -50%) rotate(${angle}deg)`,
                   fontFamily: activePreset?.fontName || 'Arial',
                   color: activePreset?.primaryColor || '#FFFFFF',
                   WebkitTextStroke: `${activePreset?.outline ?? 2.5}px ${activePreset?.outlineColor || '#000000'}`,
                   textShadow: '0 2px 4px rgba(0,0,0,0.85)',
-                  fontSize: `${Math.round((activePreset?.fontSize || 48) * (360 / subtitleFrame.playResY))}px`,
+                  fontSize: `${Math.max(12, Math.round((activePreset?.fontSize || 48) * (previewHeight / frameH)))}px`,
                 }}
                 className={`absolute max-w-[90%] text-center font-bold px-2 py-1 transition-transform pointer-events-none ${
                   isDraggingText ? 'scale-105 opacity-90' : ''
@@ -394,15 +415,15 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
               {/* Crosshair on drag */}
               <div
                 style={{
-                  left: `${(posCoord.x / 640) * 100}%`,
-                  top: `${(posCoord.y / 360) * 100}%`,
+                  left: `${(posCoord.x / frameW) * 100}%`,
+                  top: `${(posCoord.y / frameH) * 100}%`,
                 }}
                 className="absolute w-5 h-5 -ml-2.5 -mt-2.5 border-2 border-sky-400 rounded-full pointer-events-none opacity-70"
               />
 
               {/* Coordinate & Angle Status Footer Overlay */}
               <div className="absolute bottom-2 inset-x-2 text-center bg-black/75 backdrop-blur-xs py-1 rounded text-[11px] text-slate-300 pointer-events-none font-mono">
-                Konum: X={Math.round((posCoord.x / 640) * subtitleFrame.playResX)}, Y={Math.round((posCoord.y / 360) * subtitleFrame.playResY)} • Döndürme: {angle}°
+                Konum: \pos({posCoord.x}, {posCoord.y}) • Döndürme: {angle}°
               </div>
             </div>
 
