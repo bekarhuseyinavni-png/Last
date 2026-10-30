@@ -11,6 +11,9 @@ interface SubtitleOverlayProps {
   styleDefinitions?: AssStyleDefinition[];
   sourceVideoWidth?: number;
   sourceVideoHeight?: number;
+  naturalVideoWidth?: number;
+  naturalVideoHeight?: number;
+  editorScreenHeight?: number;
   currentPositionMs: number;
   onCueDragged?: (cueId: number, newAssX: number, newAssY: number) => void;
   onCueDragEnded?: (cueId: number) => void;
@@ -23,6 +26,9 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
   styleDefinitions,
   sourceVideoWidth = 1920,
   sourceVideoHeight = 1080,
+  naturalVideoWidth,
+  naturalVideoHeight,
+  editorScreenHeight,
   currentPositionMs,
   onCueDragged,
   onCueDragEnded,
@@ -36,13 +42,22 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
     if (!el) return;
 
     const updateDims = () => {
-      setDimensions({ width: el.clientWidth, height: el.clientHeight });
+      const rect = el.getBoundingClientRect();
+      const w = el.clientWidth || rect.width;
+      const h = el.clientHeight || rect.height;
+      if (w > 0 && h > 0) {
+        setDimensions({ width: w, height: h });
+      }
     };
 
     updateDims();
     const observer = new ResizeObserver(updateDims);
     observer.observe(el);
-    return () => observer.disconnect();
+    window.addEventListener('resize', updateDims);
+    return () => {
+      observer.disconnect();
+      window.removeEventListener('resize', updateDims);
+    };
   }, []);
 
   // Strictly filter only cues that should be visible at currentPositionMs (between startTimeMs and endTimeMs)
@@ -55,30 +70,27 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
 
   const playResX = sourceVideoWidth > 0 ? sourceVideoWidth : 1920;
   const playResY = sourceVideoHeight > 0 ? sourceVideoHeight : 1080;
-  const videoAspect = playResX / playResY;
 
-  const containerW = dimensions.width || 800;
-  const containerH = dimensions.height || 450;
-  const containerAspect = containerW / (containerH || 1);
+  // ModernSubtitleEditorScreen'in ekrandaki uzunluğu (rendered screen height)
+  const editorLengthY =
+    editorScreenHeight && editorScreenHeight > 0
+      ? editorScreenHeight
+      : dimensions.height > 0
+      ? dimensions.height
+      : 450;
 
-  let contentW = containerW;
-  let contentH = containerH;
-  let contentOffsetX = 0;
-  let contentOffsetY = 0;
+  // ModernSubtitleEditorScreen üzerinde bulunan sub overlay'i ekranda
+  // ModernSubtitleEditorScreen'in büyüklüğüne göre oranlanması:
+  // assScale = (ModernSubtitleEditorScreen'in ekrandaki uzunluğu / PlayResY)
+  const assScale = editorLengthY / playResY;
 
-  if (containerAspect > videoAspect) {
-    // Pillarbox
-    contentH = containerH;
-    contentW = contentH * videoAspect;
-    contentOffsetX = (containerW - contentW) / 2;
-  } else {
-    // Letterbox
-    contentW = containerW;
-    contentH = contentW / videoAspect;
-    contentOffsetY = (containerH - contentH) / 2;
-  }
+  const containerW = dimensions.width || Math.round(editorLengthY * (playResX / playResY));
+  const containerH = dimensions.height || editorLengthY;
 
-  const assScale = contentH / playResY;
+  const contentH = editorLengthY;
+  const contentW = contentH * (playResX / playResY);
+  const contentOffsetX = Math.max(0, (containerW - contentW) / 2);
+  const contentOffsetY = Math.max(0, (containerH - contentH) / 2);
 
   return (
     <div
@@ -108,6 +120,7 @@ export const SubtitleOverlay: React.FC<SubtitleOverlayProps> = ({
               playResX={playResX}
               playResY={playResY}
               assScale={assScale}
+              editorLengthY={editorLengthY}
               currentPositionMs={currentPositionMs}
               onCueDragged={onCueDragged}
               onCueDragEnded={onCueDragEnded}
@@ -125,6 +138,7 @@ interface ItemProps {
   playResX: number;
   playResY: number;
   assScale: number;
+  editorLengthY: number;
   currentPositionMs: number;
   onCueDragged?: (cueId: number, newAssX: number, newAssY: number) => void;
   onCueDragEnded?: (cueId: number) => void;
@@ -136,6 +150,7 @@ const AegisubSubtitleItem: React.FC<ItemProps> = ({
   playResX,
   playResY,
   assScale,
+  editorLengthY,
   currentPositionMs,
   onCueDragged,
   onCueDragEnded,
@@ -147,9 +162,11 @@ const AegisubSubtitleItem: React.FC<ItemProps> = ({
   // Alignment \an1..\an9
   const alignmentAn = tags.an ?? getAssAlignment(style.verticalAlign, style.horizontalAlign);
 
-  // Font size
+  // Seçilen font büyüklüğü (preset, custom veya \fs override tag)
   const fsAss = tags.fs ?? (cue.customPositionEnabled && cue.customFontSizeSp ? cue.customFontSizeSp : style.fontSizeSp);
-  const fontSizePx = fsAss * assScale;
+
+  // Görünen font büyüklüğü = seçilen font büyüklüğü * (ModernSubtitleEditorScreen'in ekrandaki uzunluğu / PlayResY)
+  const fontSizePx = fsAss * (editorLengthY / playResY);
 
   // Colors
   const primaryColor = tags.c || tags.c1 ? parseAssHexColor(tags.c || tags.c1!) : style.textColor;
@@ -298,7 +315,9 @@ const AegisubSubtitleItem: React.FC<ItemProps> = ({
         textDecoration: isUnderline && isStrike ? 'underline line-through' : isUnderline ? 'underline' : isStrike ? 'line-through' : 'none',
         color: primaryColor,
         textAlign,
-        whiteSpace: 'pre-wrap',
+        whiteSpace: 'pre',
+        maxWidth: 'none',
+        width: 'max-content',
         textShadow: textShadowParts.length > 0 ? textShadowParts.join(', ') : undefined,
         backgroundColor: style.hasBackgroundBox ? style.backgroundColor : undefined,
         padding: style.hasBackgroundBox ? `${Math.round(4 * assScale)}px ${Math.round(8 * assScale)}px` : undefined,
@@ -337,6 +356,7 @@ function renderStyledSubtitleText(rawText: string, cleanText: string, assScale: 
   let activeStrike = false;
   let activeColor: string | null = null;
   let activeFontSize: number | null = null;
+  let activeFontName: string | null = null;
 
   const elements: React.ReactNode[] = [];
 
@@ -372,6 +392,11 @@ function renderStyledSubtitleText(rawText: string, cleanText: string, assScale: 
       if (fsMatch) {
         activeFontSize = parseFloat(fsMatch[1]) * assScale;
       }
+
+      const fnMatch = /\\fn([^\\}]+)/.exec(inner);
+      if (fnMatch) {
+        activeFontName = fnMatch[1].trim();
+      }
       return;
     }
 
@@ -382,6 +407,7 @@ function renderStyledSubtitleText(rawText: string, cleanText: string, assScale: 
     if (activeStrike) spanStyle.textDecoration = 'line-through';
     if (activeColor) spanStyle.color = activeColor;
     if (activeFontSize) spanStyle.fontSize = `${activeFontSize}px`;
+    if (activeFontName) spanStyle.fontFamily = `"${activeFontName}", sans-serif`;
 
     elements.push(
       <span key={`text-${idx}`} style={spanStyle}>

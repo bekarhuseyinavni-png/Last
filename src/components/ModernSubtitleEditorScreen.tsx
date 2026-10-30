@@ -158,6 +158,36 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
   const subtitleInputRef = useRef<HTMLInputElement>(null);
   const fontInputRef = useRef<HTMLInputElement>(null);
 
+  // Player container ref and measured screen height (ModernSubtitleEditorScreen'in ekrandaki uzunluğu)
+  const playerContainerRef = useRef<HTMLDivElement>(null);
+  const [editorScreenHeight, setEditorScreenHeight] = useState<number>(0);
+  const [isDraggingFile, setIsDraggingFile] = useState(false);
+
+  useEffect(() => {
+    const el = playerContainerRef.current;
+    if (!el) return;
+    const updateDims = () => {
+      const h = el.clientHeight || el.getBoundingClientRect().height;
+      if (h > 0) {
+        setEditorScreenHeight(h);
+      }
+    };
+    updateDims();
+    const obs = new ResizeObserver(updateDims);
+    obs.observe(el);
+    window.addEventListener('resize', updateDims);
+    return () => {
+      obs.disconnect();
+      window.removeEventListener('resize', updateDims);
+    };
+  }, [playResX, playResY]);
+
+  // Track actual video dimensions
+  const [naturalVideoSize, setNaturalVideoSize] = useState<{ width: number; height: number }>({
+    width: 0,
+    height: 0,
+  });
+
   // Sync video time
   const handleTimeUpdate = () => {
     if (videoRef.current) {
@@ -169,6 +199,12 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
   const handleLoadedMetadata = () => {
     if (videoRef.current) {
       setDurationMs(Math.round(videoRef.current.duration * 1000) || 35000);
+      if (videoRef.current.videoWidth > 0 && videoRef.current.videoHeight > 0) {
+        setNaturalVideoSize({
+          width: videoRef.current.videoWidth,
+          height: videoRef.current.videoHeight,
+        });
+      }
     }
   };
 
@@ -413,8 +449,31 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
         {/* Left Side: Video Preview + Player Controls + Quick Cue Editor */}
         <div className="lg:w-3/5 xl:w-2/3 flex flex-col border-b lg:border-b-0 lg:border-r border-slate-800 bg-[#0C0E14]">
           {/* Video Player Box with Subtitle Overlay directly governed by PlayResX & PlayResY */}
-          <div className="relative w-full bg-[#08090D] flex items-center justify-center p-2 lg:p-3 overflow-hidden">
+          <div
+            className={`relative w-full bg-[#08090D] flex items-center justify-center p-2 lg:p-3 overflow-hidden transition-colors ${
+              isDraggingFile ? 'ring-2 ring-indigo-500 bg-indigo-950/30' : ''
+            }`}
+            onDragOver={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(true);
+            }}
+            onDragLeave={() => setIsDraggingFile(false)}
+            onDrop={(e) => {
+              e.preventDefault();
+              setIsDraggingFile(false);
+              const file = e.dataTransfer.files?.[0];
+              if (!file) return;
+              if (file.name.match(/\.(ass|ssa|srt|txt)$/i)) {
+                onLoadCustomSubtitle(file);
+              } else if (file.name.match(/\.(mp4|webm|mkv|mov|avi)$/i)) {
+                onLoadCustomVideo(file);
+              } else if (file.name.match(/\.(ttf|otf)$/i)) {
+                onLoadCustomFont(file);
+              }
+            }}
+          >
             <div
+              ref={playerContainerRef}
               className="relative w-full max-h-[55vh] xl:max-h-[62vh] mx-auto bg-black flex items-center justify-center overflow-hidden group rounded-xl border border-slate-800/80 shadow-2xl transition-all duration-300"
               style={{
                 aspectRatio: `${playResX} / ${playResY}`,
@@ -433,26 +492,34 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
                 onClick={togglePlay}
               />
 
-              {/* Subtitle Overlay strictly positioned over the video */}
+              {/* Subtitle Overlay strictly positioned and proportioned over the video */}
               <SubtitleOverlay
                 activeCues={visibleCues}
                 style={style}
                 styleDefinitions={styles}
                 sourceVideoWidth={playResX}
                 sourceVideoHeight={playResY}
+                naturalVideoWidth={naturalVideoSize.width}
+                naturalVideoHeight={naturalVideoSize.height}
+                editorScreenHeight={editorScreenHeight}
                 currentPositionMs={currentTimeMs}
                 onCueDragged={handleCueDragged}
               />
 
-              {/* Resolution indicator badge governed by Font & Biçim */}
+              {/* Resolution indicator badge governed by PlayResX & PlayResY from ASS */}
               <button
                 type="button"
                 onClick={() => setActiveDrawer('TEXT_STYLE')}
                 className="absolute top-2.5 right-2.5 z-10 flex items-center gap-1.5 px-2.5 py-1 bg-black/80 hover:bg-black/95 backdrop-blur-md rounded-md border border-slate-700/80 text-[10px] font-mono text-sky-300 transition shadow-md pointer-events-auto"
-                title="Sub Frame çözünürlüğünü Font & Biçim çekmecesinden düzenleyin"
+                title={`Sub Frame PlayRes: ${playResX}x${playResY} | Ekrandaki Uzunluk: ${Math.round(editorScreenHeight)}px | Font Ölçeği: ${(editorScreenHeight > 0 ? editorScreenHeight / playResY : 1).toFixed(3)}x`}
               >
                 <Tv className="w-3 h-3 text-sky-400" />
                 <span>PlayRes: {playResX}x{playResY}</span>
+                {editorScreenHeight > 0 && (
+                  <span className="text-[9px] text-indigo-300 border-l border-slate-700 pl-1.5 font-sans">
+                    {Math.round(editorScreenHeight)}px ({(editorScreenHeight / playResY).toFixed(2)}x)
+                  </span>
+                )}
               </button>
 
               {/* Center Play Button Overlay on Hover */}
@@ -981,22 +1048,33 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
 
                         {/* Font Family Selection */}
                         <div>
-                          <label className="text-[11px] text-slate-400 block mb-1">Font Ailesi (Fontname)</label>
-                          <div className="grid grid-cols-2 gap-1.5">
-                            {['Arial', 'Roboto', 'Montserrat', 'Trebuchet MS'].map((f) => (
+                          <div className="flex items-center justify-between mb-1">
+                            <label className="text-[11px] text-slate-400">Font Ailesi (Fontname)</label>
+                            <span className="text-[10px] font-mono text-indigo-400 font-semibold">{activePresetDef.fontName}</span>
+                          </div>
+                          <div className="grid grid-cols-2 sm:grid-cols-3 gap-1.5 mb-2">
+                            {['Arial', 'Roboto', 'Montserrat', 'Trebuchet MS', 'Comic Sans MS'].map((f) => (
                               <button
                                 key={f}
                                 onClick={() => handleUpdateCurrentPreset((p) => ({ ...p, fontName: f }))}
+                                style={{ fontFamily: `"${f}", sans-serif` }}
                                 className={`p-1.5 rounded border text-left font-medium text-xs transition ${
-                                  activePresetDef.fontName === f
-                                    ? 'border-indigo-500 bg-indigo-500/20 text-white'
-                                    : 'border-slate-800 bg-[#141721] text-slate-400'
+                                  activePresetDef.fontName.toLowerCase() === f.toLowerCase()
+                                    ? 'border-indigo-500 bg-indigo-500/20 text-white font-bold shadow-xs'
+                                    : 'border-slate-800 bg-[#141721] text-slate-400 hover:text-white'
                                 }`}
                               >
                                 {f}
                               </button>
                             ))}
                           </div>
+                          <input
+                            type="text"
+                            value={activePresetDef.fontName}
+                            onChange={(e) => handleUpdateCurrentPreset((p) => ({ ...p, fontName: e.target.value }))}
+                            placeholder="Özel Font Adı girin..."
+                            className="w-full bg-[#0C0E14] border border-slate-700 rounded-lg px-2.5 py-1 text-xs text-white font-mono"
+                          />
                         </div>
 
                         {/* Font Size Slider */}
@@ -1583,12 +1661,32 @@ export const ModernSubtitleEditorScreen: React.FC<ModernSubtitleEditorScreenProp
               />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Font Adı (\fn)</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs text-slate-400">Font Adı (\fn)</label>
+                <span className="text-[10px] text-indigo-400 font-mono">{batchFontName || 'Seçilmedi'}</span>
+              </div>
+              <div className="flex flex-wrap gap-1 mb-2">
+                {['Arial', 'Roboto', 'Montserrat', 'Comic Sans MS'].map((f) => (
+                  <button
+                    key={f}
+                    type="button"
+                    onClick={() => setBatchFontName(f)}
+                    style={{ fontFamily: `"${f}", sans-serif` }}
+                    className={`px-2 py-0.5 rounded text-[11px] border transition ${
+                      batchFontName === f
+                        ? 'border-indigo-500 bg-indigo-500/20 text-white font-bold'
+                        : 'border-slate-800 bg-[#0C0E14] text-slate-400 hover:text-white'
+                    }`}
+                  >
+                    {f}
+                  </button>
+                ))}
+              </div>
               <input
                 type="text"
                 value={batchFontName}
                 onChange={(e) => setBatchFontName(e.target.value)}
-                placeholder="Örn: Montserrat"
+                placeholder="Örn: Comic Sans MS"
                 className="w-full bg-[#0C0E14] border border-slate-700 rounded-lg px-3 py-1.5 text-xs text-white font-mono"
               />
             </div>

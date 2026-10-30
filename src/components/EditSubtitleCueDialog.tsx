@@ -404,8 +404,11 @@ export const EditSubtitleCueDialog: React.FC<EditSubtitleCueDialogProps> = ({
                   WebkitTextStroke: `${activePreset?.outline ?? 2.5}px ${activePreset?.outlineColor || '#000000'}`,
                   textShadow: '0 2px 4px rgba(0,0,0,0.85)',
                   fontSize: `${Math.max(12, Math.round((activePreset?.fontSize || 48) * (previewHeight / frameH)))}px`,
+                  whiteSpace: 'pre',
+                  maxWidth: 'none',
+                  width: 'max-content',
                 }}
-                className={`absolute max-w-[90%] text-center font-bold px-2 py-1 transition-transform pointer-events-none ${
+                className={`absolute text-center font-bold px-2 py-1 transition-transform pointer-events-none ${
                   isDraggingText ? 'scale-105 opacity-90' : ''
                 }`}
               >

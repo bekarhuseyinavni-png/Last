@@ -301,18 +301,26 @@ export function extractAssStyles(content: string): string[] {
 }
 
 export function extractScriptResolution(content: string): { width: number; height: number } | null {
+  const clean = content.replace(/^\uFEFF/, '');
   let rx: number | null = null;
   let ry: number | null = null;
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.toLowerCase().startsWith('playresx:')) {
-      rx = parseInt(trimmed.substring(9).trim(), 10);
-    } else if (trimmed.toLowerCase().startsWith('playresy:')) {
-      ry = parseInt(trimmed.substring(9).trim(), 10);
+  for (const rawLine of clean.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    const matchX = /^\s*playresx\s*:\s*(\d+)/i.exec(trimmed);
+    if (matchX) {
+      const val = parseInt(matchX[1], 10);
+      if (!isNaN(val) && val > 0) rx = val;
+    }
+    const matchY = /^\s*playresy\s*:\s*(\d+)/i.exec(trimmed);
+    if (matchY) {
+      const val = parseInt(matchY[1], 10);
+      if (!isNaN(val) && val > 0) ry = val;
     }
     if (trimmed.toLowerCase().startsWith('[events]')) break;
   }
   if (rx || ry) {
+    if (ry && !rx) rx = Math.round(ry * (16 / 9));
+    else if (rx && !ry) ry = Math.round(rx * (9 / 16));
     return { width: rx || 1920, height: ry || 1080 };
   }
   return null;
@@ -469,6 +477,25 @@ export function parseAllAssStyles(content: string): AssStyleDefinition[] {
         marginL: 30,
         marginR: 30,
         marginV: 40,
+      },
+      {
+        name: 'Comic',
+        fontName: 'Comic Sans MS',
+        fontSize: 46,
+        primaryColor: '#FFF085',
+        outlineColor: '#1E1B4B',
+        backColor: 'rgba(0,0,0,0.6)',
+        bold: true,
+        italic: false,
+        underline: false,
+        angle: 0,
+        borderStyle: 1,
+        outline: 2.5,
+        shadow: 2,
+        alignment: 2,
+        marginL: 30,
+        marginR: 30,
+        marginV: 40,
       }
     );
   }
@@ -520,19 +547,29 @@ export function parseAssDefaultStyle(content: string): SubtitleStyle | null {
 }
 
 export function parseAssScriptResolution(content: string): { playResX: number; playResY: number } {
-  let playResX = 1920;
-  let playResY = 1080;
-  for (const line of content.split(/\r?\n/)) {
-    const trimmed = line.trim();
-    if (trimmed.toLowerCase().startsWith('playresx:')) {
-      const val = parseInt(trimmed.substring(9).trim(), 10);
+  const clean = content.replace(/^\uFEFF/, '');
+  let playResX: number | null = null;
+  let playResY: number | null = null;
+  for (const rawLine of clean.split(/\r?\n/)) {
+    const trimmed = rawLine.trim();
+    const matchX = /^\s*playresx\s*:\s*(\d+)/i.exec(trimmed);
+    if (matchX) {
+      const val = parseInt(matchX[1], 10);
       if (!isNaN(val) && val > 0) playResX = val;
-    } else if (trimmed.toLowerCase().startsWith('playresy:')) {
-      const val = parseInt(trimmed.substring(9).trim(), 10);
+    }
+    const matchY = /^\s*playresy\s*:\s*(\d+)/i.exec(trimmed);
+    if (matchY) {
+      const val = parseInt(matchY[1], 10);
       if (!isNaN(val) && val > 0) playResY = val;
     }
+    if (trimmed.toLowerCase().startsWith('[events]')) break;
   }
-  return { playResX, playResY };
+  if (playResY && !playResX) {
+    playResX = Math.round(playResY * (16 / 9));
+  } else if (playResX && !playResY) {
+    playResY = Math.round(playResX * (9 / 16));
+  }
+  return { playResX: playResX || 1920, playResY: playResY || 1080 };
 }
 
 export function exportToSrt(cues: SubtitleCue[]): string {
@@ -571,6 +608,7 @@ Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour,
 Style: Default,Arial,50,&H00FFFFFF,&H000000FF,&H00000000,&H80000000,-1,0,0,0,100,100,0,0,1,3,2,2,30,30,40,1
 Style: Main,Roboto,46,&H00F1F5F9,&H000000FF,&H00141721,&H80000000,-1,0,0,0,100,100,0,0,1,2.5,2,2,30,30,40,1
 Style: Sign,Montserrat,40,&H0038BDF8,&H000000FF,&H000C0E14,&H90000000,-1,0,0,0,100,100,0,0,1,2,0,8,20,20,30,1
+Style: Comic,Comic Sans MS,46,&H00FFF085,&H000000FF,&H001E1B4B,&H80000000,-1,0,0,0,100,100,0,0,1,2.5,2,2,30,30,40,1
 
 [Events]
 Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
